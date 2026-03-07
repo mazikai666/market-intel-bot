@@ -42,7 +42,7 @@ jobs:
           DEFAULT_PIC_URL: https://mazikai666.github.io/market-intel-bot/cover.png
           PUSH_TO_WECOM: "false"
           TEST_NEWS: "中东局势升级，市场避险情绪上升，原油和黄金上涨，纳指期货走弱。"
-          SOURCE_ARTICLE_URL: ""
+          SOURCE_ARTICLE_URL: "https://www.reuters.com/world/"
         run: python main.py
 
       - name: Debug generated files
@@ -54,8 +54,8 @@ jobs:
           ls -la
           echo "==== ls images ===="
           ls -la images || true
-          echo "==== requirements.txt ===="
-          cat requirements.txt || true
+          echo "==== report_meta.json ===="
+          cat report_meta.json || true
 
       - name: Prepare Pages files
         run: |
