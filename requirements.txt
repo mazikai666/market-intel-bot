@@ -1,2 +1,4 @@
 requests
 pillow
+beautifulsoup4
+lxml
