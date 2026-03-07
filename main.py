@@ -361,9 +361,32 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
         </div>
         """
 
-    gallery_section = gallery_html if gallery_html else '<div class="gallery-item"><img src="cover.png" alt="fallback cover"></div>'
-    visual_block_1 = image_block_1 if image_block_1 else '<div class="card story"><h2>现场画面</h2><p>当前未抓取到原文配图，系统已使用自动封面图作为视觉补充。</p></div>'
-    visual_block_2 = image_block_2 if image_block_2 else '<div class="card story"><h2>进一步观察</h2><p>后续如果接入真实新闻源，页面会优先展示原文中的头图、正文图与图表类图片。</p></div>'
+    has_source_images = len(normalized_images) > 0
+
+    visual_block_1 = image_block_1 if image_block_1 else """
+    <div class="card story">
+      <h2>现场画面</h2>
+      <p>当前未抓取到可用的原文配图，建议改用具体文章链接而不是频道页。</p>
+    </div>
+    """
+
+    visual_block_2 = image_block_2 if image_block_2 else """
+    <div class="card story">
+      <h2>进一步观察</h2>
+      <p>一旦接入真实文章页，系统会优先展示原文中的头图与正文大图。</p>
+    </div>
+    """
+
+    gallery_section = ""
+    if has_source_images:
+        gallery_section = f"""
+        <section class="card">
+          <h2>资讯图片</h2>
+          <div class="gallery">
+            {gallery_html}
+          </div>
+        </section>
+        """
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -702,12 +725,7 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
       </div>
     </section>
 
-    <section class="card">
-      <h2>资讯图片</h2>
-      <div class="gallery">
-        {gallery_section}
-      </div>
-    </section>
+    {gallery_section}
 
     <section class="card risk">
       <h2>还要留意什么变量</h2>
