@@ -9,11 +9,11 @@ WECOM_WEBHOOK = os.getenv("WECOM_WEBHOOK")
 
 TEST_NEWS = "中东局势升级，市场避险情绪上升，原油和黄金上涨，纳指期货走弱。"
 
-# 先用占位图，后面可以换成你自己的图床链接
-DEFAULT_PIC_URL = "https://picsum.photos/900/500"
+# 你自己的 GitHub Pages 链接
+DEFAULT_REPORT_URL = "https://mazikai666.github.io/market-intel-bot/"
 
-# 先用占位链接，后面你接 GitHub Pages 再换成自己的 report 页面链接
-DEFAULT_REPORT_URL = "https://example.com"
+# 先用一个通用封面图，后面可以再换成你自己的
+DEFAULT_PIC_URL = "https://picsum.photos/900/500"
 
 
 def extract_json_from_text(content: str) -> dict:
@@ -22,17 +22,14 @@ def extract_json_from_text(content: str) -> dict:
 
     content = content.strip()
 
-    # 去掉 markdown 代码块头
     if content.startswith("```json"):
         content = content[len("```json"):].strip()
     elif content.startswith("```"):
         content = content[len("```"):].strip()
 
-    # 去掉 markdown 代码块尾
     if content.endswith("```"):
         content = content[:-3].strip()
 
-    # 只截取最外层 JSON
     start = content.find("{")
     end = content.rfind("}")
     if start == -1 or end == -1 or end <= start:
