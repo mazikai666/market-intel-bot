@@ -9,11 +9,41 @@ WECOM_WEBHOOK = os.getenv("WECOM_WEBHOOK")
 
 TEST_NEWS = "中东局势升级，市场避险情绪上升，原油和黄金上涨，纳指期货走弱。"
 
-# 先放一张通用封面图；后面你可以换成自己的图片地址
+# 先用占位图，后面可以换成你自己的图床链接
 DEFAULT_PIC_URL = "https://picsum.photos/900/500"
 
-# 先放一个占位详情页；后面你接 GitHub Pages 再换成你自己的页面
+# 先用占位链接，后面你接 GitHub Pages 再换成自己的 report 页面链接
 DEFAULT_REPORT_URL = "https://example.com"
+
+
+def extract_json_from_text(content: str) -> dict:
+    if not content or not content.strip():
+        raise ValueError("DeepSeek 返回为空，请检查 API 响应。")
+
+    content = content.strip()
+
+    # 去掉 markdown 代码块头
+    if content.startswith("```json"):
+        content = content[len("```json"):].strip()
+    elif content.startswith("```"):
+        content = content[len("```"):].strip()
+
+    # 去掉 markdown 代码块尾
+    if content.endswith("```"):
+        content = content[:-3].strip()
+
+    # 只截取最外层 JSON
+    start = content.find("{")
+    end = content.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError(f"无法从 DeepSeek 返回中提取 JSON：{content}")
+
+    json_text = content[start:end + 1]
+
+    print("清洗后的 JSON 文本：")
+    print(json_text)
+
+    return json.loads(json_text)
 
 
 def call_deepseek(news_text: str) -> dict:
@@ -58,8 +88,14 @@ def call_deepseek(news_text: str) -> dict:
     data = {
         "model": "deepseek-chat",
         "messages": [
-            {"role": "system", "content": "你是一个严格输出 JSON 的市场情报编辑。"},
-            {"role": "user", "content": prompt},
+            {
+                "role": "system",
+                "content": "你是一个严格输出 JSON 的市场情报编辑。只返回 JSON 对象本身，不要加解释，不要加代码块。"
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
         ],
         "temperature": 0.5,
     }
@@ -67,8 +103,12 @@ def call_deepseek(news_text: str) -> dict:
     resp = requests.post(url, headers=headers, json=data, timeout=90)
     resp.raise_for_status()
     result = resp.json()
+
     content = result["choices"][0]["message"]["content"]
-    return json.loads(content)
+    print("DeepSeek 原始返回：")
+    print(repr(content))
+
+    return extract_json_from_text(content)
 
 
 def build_html_report(data: dict) -> str:
@@ -217,14 +257,14 @@ def push_news_to_wecom(title: str, description: str, url: str, picurl: str, max_
     last_error = None
     for i in range(max_retries):
         try:
-            print(f"企业微信图文推送尝试第 {i+1} 次...")
+            print(f"企业微信图文推送尝试第 {i + 1} 次...")
             resp = requests.post(WECOM_WEBHOOK, json=payload, timeout=20)
             resp.raise_for_status()
             print("企业微信返回：", resp.text)
             return resp.text
         except requests.exceptions.RequestException as e:
             last_error = e
-            print(f"第 {i+1} 次图文推送失败：{e}")
+            print(f"第 {i + 1} 次图文推送失败：{e}")
             time.sleep(5)
 
     raise last_error
@@ -233,12 +273,12 @@ def push_news_to_wecom(title: str, description: str, url: str, picurl: str, max_
 def main():
     print("开始调用 DeepSeek...")
     data = call_deepseek(TEST_NEWS)
-    print("DeepSeek 返回：")
+    print("DeepSeek 解析后的结果：")
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
     html = build_html_report(data)
-    save_html_report(html)
-    print("已生成 report.html")
+    filename = save_html_report(html)
+    print(f"已生成 HTML 报告：{filename}")
 
     title = data.get("title", "市场快讯")
     description = data.get("description", "暂无摘要")
