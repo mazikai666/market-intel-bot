@@ -75,3 +75,11 @@ def main():
 
 ```json
 {content}
+```"""
+
+    result = push_to_wecom(message)
+    print("推送结果：", result)
+
+
+if __name__ == "__main__":
+    main()
