@@ -31,7 +31,9 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Generate report
         env:
@@ -44,6 +46,7 @@ jobs:
         run: python main.py
 
       - name: Debug generated files
+        if: always()
         run: |
           echo "==== current dir ===="
           pwd
@@ -51,6 +54,8 @@ jobs:
           ls -la
           echo "==== ls images ===="
           ls -la images || true
+          echo "==== requirements.txt ===="
+          cat requirements.txt || true
 
       - name: Prepare Pages files
         run: |
