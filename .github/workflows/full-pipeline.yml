@@ -11,29 +11,29 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "market-intel-pages"
+  group: market-intel-pages
   cancel-in-progress: true
 
 jobs:
   build-deploy-push:
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
 
     steps:
-      - name: 拉取代码
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 安装 Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: 安装依赖
+      - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: 生成报告
+      - name: Generate report
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           REPORT_URL: https://mazikai666.github.io/market-intel-bot/
@@ -41,63 +41,64 @@ jobs:
           PUSH_TO_WECOM: "false"
         run: python main.py
 
-      - name: 准备 Pages 文件
+      - name: Prepare Pages files
         run: |
           mkdir -p _site
           cp report.html _site/index.html
 
-      - name: 配置 GitHub Pages
+      - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: 上传 Pages 产物
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
-      - name: 发布到 GitHub Pages
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: 推送到企业微信
+      - name: Push to WeCom
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
-        run: python - <<'PY'
-import json
-import os
-import time
-import requests
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import requests
 
-with open("report_meta.json", "r", encoding="utf-8") as f:
-    meta = json.load(f)
+          with open("report_meta.json", "r", encoding="utf-8") as f:
+              meta = json.load(f)
 
-webhook = os.environ["WECOM_WEBHOOK"]
+          webhook = os.environ["WECOM_WEBHOOK"]
 
-payload = {
-    "msgtype": "news",
-    "news": {
-        "articles": [
-            {
-                "title": meta["title"],
-                "description": meta["description"],
-                "url": meta["url"],
-                "picurl": meta["picurl"]
-            }
-        ]
-    }
-}
+          payload = {
+              "msgtype": "news",
+              "news": {
+                  "articles": [
+                      {
+                          "title": meta["title"],
+                          "description": meta["description"],
+                          "url": meta["url"],
+                          "picurl": meta["picurl"]
+                      }
+                  ]
+              }
+          }
 
-last_error = None
-for i in range(3):
-    try:
-        print(f"企业微信图文推送尝试第 {i+1} 次...")
-        resp = requests.post(webhook, json=payload, timeout=20)
-        resp.raise_for_status()
-        print("企业微信返回：", resp.text)
-        break
-    except Exception as e:
-        last_error = e
-        print(f"第 {i+1} 次图文推送失败：{e}")
-        time.sleep(5)
-else:
-    raise last_error
-PY
+          last_error = None
+          for i in range(3):
+              try:
+                  print(f"企业微信图文推送尝试第 {i+1} 次...")
+                  resp = requests.post(webhook, json=payload, timeout=20)
+                  resp.raise_for_status()
+                  print("企业微信返回：", resp.text)
+                  break
+              except Exception as e:
+                  last_error = e
+                  print(f"第 {i+1} 次图文推送失败：{e}")
+                  time.sleep(5)
+          else:
+              raise last_error
+          PY
