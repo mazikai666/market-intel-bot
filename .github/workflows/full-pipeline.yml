@@ -39,13 +39,25 @@ jobs:
           REPORT_URL: https://mazikai666.github.io/market-intel-bot/
           DEFAULT_PIC_URL: https://mazikai666.github.io/market-intel-bot/cover.png
           PUSH_TO_WECOM: "false"
+          TEST_NEWS: "中东局势升级，市场避险情绪上升，原油和黄金上涨，纳指期货走弱。"
+          SOURCE_ARTICLE_URL: ""
         run: python main.py
+
+      - name: Debug generated files
+        run: |
+          echo "==== current dir ===="
+          pwd
+          echo "==== ls root ===="
+          ls -la
+          echo "==== ls images ===="
+          ls -la images || true
 
       - name: Prepare Pages files
         run: |
-          mkdir -p _site
+          mkdir -p _site/images
           cp report.html _site/index.html
           cp cover.png _site/cover.png
+          cp -r images/. _site/images/ || true
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
