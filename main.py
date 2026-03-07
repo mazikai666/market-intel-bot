@@ -1,11 +1,10 @@
 import os
 import io
-import re
 import json
 import time
 import textwrap
 from html import escape
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -19,7 +18,6 @@ REPORT_URL = os.getenv("REPORT_URL", "https://mazikai666.github.io/market-intel-
 DEFAULT_PIC_URL = os.getenv("DEFAULT_PIC_URL", REPORT_URL + "cover.png")
 PUSH_TO_WECOM = os.getenv("PUSH_TO_WECOM", "false").lower() == "true"
 
-# 你后面接真实抓取时，可以把这两个环境变量换掉
 TEST_NEWS = os.getenv(
     "TEST_NEWS",
     "中东局势升级，市场避险情绪上升，原油和黄金上涨，纳指期货走弱。"
@@ -206,7 +204,7 @@ def generate_cover_image(data: dict, filename: str = COVER_FILE) -> str:
     points = [(980, 640), (1060, 600), (1140, 620), (1230, 520), (1320, 560), (1400, 470), (1490, 510)]
     draw.line(points, fill="#60a5fa", width=8)
     for p in points:
-        draw.ellipse([p[0]-8, p[1]-8, p[0]+8, p[1]+8], fill="#bfdbfe")
+        draw.ellipse([p[0] - 8, p[1] - 8, p[0] + 8, p[1] + 8], fill="#bfdbfe")
 
     img.save(filename, format="PNG")
     return filename
@@ -275,7 +273,7 @@ def fetch_article_images(article_url: str, max_images: int = 3) -> list[str]:
         src = img.get("src") or img.get("data-src") or img.get("data-original") or img.get("srcset")
         if not src:
             continue
-        if "srcset" in img.attrs and img.get("srcset"):
+        if img.get("srcset"):
             src = img.get("srcset").split(",")[-1].strip().split(" ")[0]
         full = normalize_img_url(src, article_url)
         if full:
@@ -291,10 +289,10 @@ def fetch_article_images(article_url: str, max_images: int = 3) -> list[str]:
             unique.append(u)
 
     saved = []
-    for idx, img_url in enumerate(unique):
+    for img_url in unique:
         if len(saved) >= max_images:
             break
-        out_path = os.path.join(IMAGES_DIR, f"source_{len(saved)+1}.jpg")
+        out_path = os.path.join(IMAGES_DIR, f"source_{len(saved) + 1}.jpg")
         if download_image(img_url, out_path):
             saved.append(out_path)
 
@@ -334,9 +332,10 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
         </div>
         """
 
+    normalized_images = [escape(p.replace(os.sep, "/")) for p in source_images]
+
     gallery_html = ""
-    for img_path in source_images:
-        rel = escape(img_path.replace("\\", "/"))
+    for rel in normalized_images:
         gallery_html += f"""
         <div class="gallery-item">
           <img src="{rel}" alt="source image">
@@ -345,18 +344,26 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
 
     image_block_1 = ""
     image_block_2 = ""
-    if len(source_images) >= 1:
+
+    if len(normalized_images) >= 1:
+        img1 = normalized_images[0]
         image_block_1 = f"""
         <div class="inline-visual">
-          <img src="{escape(source_images[0].replace("\\", "/"))}" alt="source image 1">
+          <img src="{img1}" alt="source image 1">
         </div>
         """
-    if len(source_images) >= 2:
+
+    if len(normalized_images) >= 2:
+        img2 = normalized_images[1]
         image_block_2 = f"""
         <div class="inline-visual">
-          <img src="{escape(source_images[1].replace("\\", "/"))}" alt="source image 2">
+          <img src="{img2}" alt="source image 2">
         </div>
         """
+
+    gallery_section = gallery_html if gallery_html else '<div class="gallery-item"><img src="cover.png" alt="fallback cover"></div>'
+    visual_block_1 = image_block_1 if image_block_1 else '<div class="card story"><h2>现场画面</h2><p>当前未抓取到原文配图，系统已使用自动封面图作为视觉补充。</p></div>'
+    visual_block_2 = image_block_2 if image_block_2 else '<div class="card story"><h2>进一步观察</h2><p>后续如果接入真实新闻源，页面会优先展示原文中的头图、正文图与图表类图片。</p></div>'
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -659,7 +666,7 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
         <h2>发生了什么</h2>
         <p>{what_happened}</p>
       </div>
-      {image_block_1 if image_block_1 else '<div class="card story"><h2>现场画面</h2><p>当前未抓取到原文配图，系统已使用自动封面图作为视觉补充。</p></div>'}
+      {visual_block_1}
     </section>
 
     <section class="story-grid">
@@ -667,7 +674,7 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
         <h2>这对市场意味着什么</h2>
         <p>{market_impact}</p>
       </div>
-      {image_block_2 if image_block_2 else '<div class="card story"><h2>进一步观察</h2><p>后续如果接入真实新闻源，页面会优先展示原文中的头图、正文图与图表类图片。</p></div>'}
+      {visual_block_2}
     </section>
 
     <section class="card">
@@ -698,7 +705,7 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
     <section class="card">
       <h2>资讯图片</h2>
       <div class="gallery">
-        {gallery_html if gallery_html else '<div class="gallery-item"><img src="cover.png" alt="fallback cover"></div>'}
+        {gallery_section}
       </div>
     </section>
 
