@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 
 
@@ -46,11 +47,10 @@ def call_deepseek():
     resp = requests.post(url, headers=headers, json=data, timeout=60)
     resp.raise_for_status()
     result = resp.json()
-
     return result["choices"][0]["message"]["content"]
 
 
-def push_to_wecom(text):
+def push_to_wecom(text, max_retries=3):
     if not WECOM_WEBHOOK:
         raise ValueError("没有找到 WECOM_WEBHOOK，请先在 GitHub Secrets 里配置。")
 
@@ -61,13 +61,28 @@ def push_to_wecom(text):
         }
     }
 
-    resp = requests.post(WECOM_WEBHOOK, json=payload, timeout=30)
-    resp.raise_for_status()
-    return resp.text
+    last_error = None
+
+    for i in range(max_retries):
+        try:
+            print(f"企业微信推送尝试第 {i+1} 次...")
+            resp = requests.post(WECOM_WEBHOOK, json=payload, timeout=20)
+            resp.raise_for_status()
+            print("企业微信返回：", resp.text)
+            return resp.text
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            print(f"第 {i+1} 次推送失败：{e}")
+            time.sleep(5)
+
+    raise last_error
 
 
 def main():
+    print("开始调用 DeepSeek...")
     content = call_deepseek()
+    print("DeepSeek 返回内容：")
+    print(content)
 
     message = f"""# 市场情报测试消息
 
@@ -77,6 +92,7 @@ def main():
 {content}
 ```"""
 
+    print("开始推送到企业微信...")
     result = push_to_wecom(message)
     print("推送结果：", result)
 
