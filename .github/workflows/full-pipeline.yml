@@ -37,7 +37,7 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           REPORT_URL: https://mazikai666.github.io/market-intel-bot/
-          DEFAULT_PIC_URL: https://picsum.photos/900/500
+          DEFAULT_PIC_URL: https://mazikai666.github.io/market-intel-bot/cover.png
           PUSH_TO_WECOM: "false"
         run: python main.py
 
@@ -45,6 +45,7 @@ jobs:
         run: |
           mkdir -p _site
           cp report.html _site/index.html
+          cp cover.png _site/cover.png
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
