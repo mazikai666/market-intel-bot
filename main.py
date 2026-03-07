@@ -1,25 +1,39 @@
 import os
+import io
+import re
 import json
 import time
 import textwrap
 from html import escape
+from urllib.parse import urljoin, urlparse
 
 import requests
+from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont
 
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 WECOM_WEBHOOK = os.getenv("WECOM_WEBHOOK")
 
-TEST_NEWS = "中东局势升级，市场避险情绪上升，原油和黄金上涨，纳指期货走弱。"
-
 REPORT_URL = os.getenv("REPORT_URL", "https://mazikai666.github.io/market-intel-bot/")
 DEFAULT_PIC_URL = os.getenv("DEFAULT_PIC_URL", REPORT_URL + "cover.png")
 PUSH_TO_WECOM = os.getenv("PUSH_TO_WECOM", "false").lower() == "true"
 
+# 你后面接真实抓取时，可以把这两个环境变量换掉
+TEST_NEWS = os.getenv(
+    "TEST_NEWS",
+    "中东局势升级，市场避险情绪上升，原油和黄金上涨，纳指期货走弱。"
+)
+SOURCE_ARTICLE_URL = os.getenv("SOURCE_ARTICLE_URL", "").strip()
+
 REPORT_HTML_FILE = "report.html"
 REPORT_META_FILE = "report_meta.json"
 COVER_FILE = "cover.png"
+IMAGES_DIR = "images"
+
+
+def ensure_dir(path: str):
+    os.makedirs(path, exist_ok=True)
 
 
 def extract_json_from_text(content: str) -> dict:
@@ -44,7 +58,6 @@ def extract_json_from_text(content: str) -> dict:
     json_text = content[start:end + 1]
     print("清洗后的 JSON 文本：")
     print(json_text)
-
     return json.loads(json_text)
 
 
@@ -60,14 +73,14 @@ def call_deepseek(news_text: str) -> dict:
 
     prompt = f"""
 你是一个专业财经媒体编辑。
-请基于下面这条新闻，生成一篇“像知名财经媒体写法”的资讯稿素材。
+请基于下面这条新闻，生成一篇“像高质量国际资讯产品”的专题页素材。
 
 要求：
 1. 写法像资讯，不要像 AI 报告
-2. 开头要有导语感，能吸引人读下去
-3. 语气专业、克制、有信息密度
-4. 强调：发生了什么、为什么值得看、对哪些资产影响最大
-5. 不要写成八股文，不要写“事件概述/事情缘由”这种机械标题
+2. 页面节奏要适合图文专题页
+3. 强调：发生了什么、为什么现在值得关注、对哪些市场与资产影响最大
+4. 语言专业、克制、有信息密度
+5. 不要写成套话，不要出现“事件概述”“事情缘由”这种机械标题
 6. 避免“必然、一定、注定”这类武断词
 7. 严格输出 JSON，不要输出任何额外文字
 
@@ -76,7 +89,7 @@ def call_deepseek(news_text: str) -> dict:
 
 请输出：
 {{
-  "title": "更像财经媒体标题，18字以内",
+  "title": "更像媒体标题，18字以内",
   "subtitle": "一句副标题，点出市场主线",
   "deck": "导语，2到3句，像媒体开头摘要",
   "key_points": [
@@ -85,7 +98,8 @@ def call_deepseek(news_text: str) -> dict:
     "重点3"
   ],
   "why_now": "为什么这件事现在值得关注",
-  "market_impact": "对市场意味着什么，用资讯风格写1段",
+  "what_happened": "发生了什么，写成资讯正文风格的一段",
+  "market_impact": "这件事对市场意味着什么，写成资讯正文风格的一段",
   "outlook_1d": "未来1天",
   "outlook_3d": "未来3天",
   "outlook_7d": "未来7天",
@@ -126,7 +140,6 @@ def call_deepseek(news_text: str) -> dict:
     content = result["choices"][0]["message"]["content"]
     print("DeepSeek 原始返回：")
     print(repr(content))
-
     return extract_json_from_text(content)
 
 
@@ -150,36 +163,34 @@ def generate_cover_image(data: dict, filename: str = COVER_FILE) -> str:
     tags = cover.get("tags", [])[:3]
 
     width, height = 1600, 900
-    img = Image.new("RGB", (width, height), "#0b1220")
+    img = Image.new("RGB", (width, height), "#07111f")
     draw = ImageDraw.Draw(img)
 
-    # background gradient-ish blocks
-    draw.rectangle([0, 0, width, height], fill="#0b1220")
-    draw.ellipse([950, -120, 1650, 580], fill="#153b8a")
-    draw.ellipse([-180, 420, 520, 1120], fill="#10264f")
-    draw.rounded_rectangle([70, 70, width - 70, height - 70], radius=36, outline="#27406e", width=2)
+    draw.rectangle([0, 0, width, height], fill="#07111f")
+    draw.ellipse([980, -120, 1700, 560], fill="#143a7b")
+    draw.ellipse([-250, 470, 520, 1200], fill="#0f2348")
+    draw.rounded_rectangle([65, 65, width - 65, height - 65], radius=38, outline="#27406e", width=2)
 
-    # decorative bars
-    draw.rounded_rectangle([90, 110, 290, 140], radius=12, fill="#1d4ed8")
-    draw.rounded_rectangle([310, 110, 520, 140], radius=12, fill="#334155")
+    draw.rounded_rectangle([90, 110, 290, 142], radius=12, fill="#1d4ed8")
+    draw.rounded_rectangle([306, 110, 520, 142], radius=12, fill="#1f2937")
 
-    title_font = _safe_font(74, bold=True)
+    title_font = _safe_font(76, bold=True)
     subtitle_font = _safe_font(30, bold=False)
     strap_font = _safe_font(26, bold=True)
     theme_font = _safe_font(28, bold=True)
     tag_font = _safe_font(24, bold=True)
 
     draw.text((100, 180), strapline, font=strap_font, fill="#93c5fd")
-    draw.text((100, 230), theme, font=theme_font, fill="#ffffff")
+    draw.text((100, 228), theme, font=theme_font, fill="#ffffff")
 
     wrapped_title = textwrap.wrap(title, width=12)
-    y = 330
+    y = 328
     for line in wrapped_title[:3]:
         draw.text((100, y), line, font=title_font, fill="#ffffff")
         y += 98
 
-    wrapped_sub = textwrap.wrap(subtitle, width=32)
-    y += 10
+    wrapped_sub = textwrap.wrap(subtitle, width=34)
+    y += 6
     for line in wrapped_sub[:2]:
         draw.text((100, y), line, font=subtitle_font, fill="#cbd5e1")
         y += 44
@@ -192,7 +203,6 @@ def generate_cover_image(data: dict, filename: str = COVER_FILE) -> str:
         draw.text((tag_x + 18, tag_y + 12), tag, font=tag_font, fill="#e5e7eb")
         tag_x += box_w + 18
 
-    # market style line motif
     points = [(980, 640), (1060, 600), (1140, 620), (1230, 520), (1320, 560), (1400, 470), (1490, 510)]
     draw.line(points, fill="#60a5fa", width=8)
     for p in points:
@@ -202,11 +212,102 @@ def generate_cover_image(data: dict, filename: str = COVER_FILE) -> str:
     return filename
 
 
-def build_html_report(data: dict) -> str:
+def normalize_img_url(src: str, base_url: str) -> str:
+    if not src:
+        return ""
+    return urljoin(base_url, src)
+
+
+def is_good_image_url(url: str) -> bool:
+    lowered = url.lower()
+    bad_keywords = ["logo", "icon", "avatar", "ads", "sprite", "badge", "emoji"]
+    return not any(k in lowered for k in bad_keywords)
+
+
+def download_image(url: str, out_path: str, timeout: int = 25) -> bool:
+    try:
+        resp = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        content_type = resp.headers.get("Content-Type", "")
+        if "image" not in content_type:
+            return False
+
+        img = Image.open(io.BytesIO(resp.content))
+        w, h = img.size
+        if w < 500 or h < 280:
+            return False
+
+        img = img.convert("RGB")
+        img.save(out_path, format="JPEG", quality=90)
+        return True
+    except Exception as e:
+        print(f"下载图片失败 {url}: {e}")
+        return False
+
+
+def fetch_article_images(article_url: str, max_images: int = 3) -> list[str]:
+    if not article_url:
+        return []
+
+    print(f"开始抓取文章图片: {article_url}")
+    ensure_dir(IMAGES_DIR)
+
+    try:
+        resp = requests.get(article_url, timeout=25, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"抓取文章失败: {e}")
+        return []
+
+    soup = BeautifulSoup(resp.text, "lxml")
+    candidates = []
+
+    for selector in [
+        ('meta[property="og:image"]', "content"),
+        ('meta[name="twitter:image"]', "content"),
+        ('meta[property="twitter:image"]', "content"),
+    ]:
+        tag = soup.select_one(selector[0])
+        if tag and tag.get(selector[1]):
+            candidates.append(normalize_img_url(tag.get(selector[1]), article_url))
+
+    for img in soup.select("article img, main img, figure img, img"):
+        src = img.get("src") or img.get("data-src") or img.get("data-original") or img.get("srcset")
+        if not src:
+            continue
+        if "srcset" in img.attrs and img.get("srcset"):
+            src = img.get("srcset").split(",")[-1].strip().split(" ")[0]
+        full = normalize_img_url(src, article_url)
+        if full:
+            candidates.append(full)
+
+    unique = []
+    seen = set()
+    for u in candidates:
+        if not u or u in seen:
+            continue
+        seen.add(u)
+        if is_good_image_url(u):
+            unique.append(u)
+
+    saved = []
+    for idx, img_url in enumerate(unique):
+        if len(saved) >= max_images:
+            break
+        out_path = os.path.join(IMAGES_DIR, f"source_{len(saved)+1}.jpg")
+        if download_image(img_url, out_path):
+            saved.append(out_path)
+
+    print(f"成功保存文章图片: {saved}")
+    return saved
+
+
+def build_html_report(data: dict, source_images: list[str]) -> str:
     title = escape(data.get("title", "市场情报"))
     subtitle = escape(data.get("subtitle", ""))
     deck = escape(data.get("deck", ""))
     why_now = escape(data.get("why_now", ""))
+    what_happened = escape(data.get("what_happened", ""))
     market_impact = escape(data.get("market_impact", ""))
     outlook_1d = escape(data.get("outlook_1d", ""))
     outlook_3d = escape(data.get("outlook_3d", ""))
@@ -215,9 +316,7 @@ def build_html_report(data: dict) -> str:
     key_points = data.get("key_points", [])
     watchlist = data.get("watchlist", [])
 
-    key_points_html = "".join(
-        f'<li>{escape(item)}</li>' for item in key_points[:3]
-    )
+    key_points_html = "".join(f"<li>{escape(item)}</li>" for item in key_points[:3])
 
     watch_html = ""
     for item in watchlist:
@@ -235,6 +334,30 @@ def build_html_report(data: dict) -> str:
         </div>
         """
 
+    gallery_html = ""
+    for img_path in source_images:
+        rel = escape(img_path.replace("\\", "/"))
+        gallery_html += f"""
+        <div class="gallery-item">
+          <img src="{rel}" alt="source image">
+        </div>
+        """
+
+    image_block_1 = ""
+    image_block_2 = ""
+    if len(source_images) >= 1:
+        image_block_1 = f"""
+        <div class="inline-visual">
+          <img src="{escape(source_images[0].replace("\\", "/"))}" alt="source image 1">
+        </div>
+        """
+    if len(source_images) >= 2:
+        image_block_2 = f"""
+        <div class="inline-visual">
+          <img src="{escape(source_images[1].replace("\\", "/"))}" alt="source image 2">
+        </div>
+        """
+
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -244,89 +367,170 @@ def build_html_report(data: dict) -> str:
   <style>
     body {{
       margin: 0;
-      background: #f3f6fb;
-      color: #111827;
+      background: #07111f;
+      color: #e5edf7;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
       line-height: 1.8;
     }}
-    .wrap {{
-      max-width: 980px;
+    .shell {{
+      max-width: 1260px;
       margin: 0 auto;
-      padding: 24px 16px 56px;
+      padding: 20px 16px 56px;
     }}
-    .hero-image {{
+    .hero {{
+      display: grid;
+      grid-template-columns: 1.5fr 0.9fr;
+      gap: 18px;
+      align-items: stretch;
+    }}
+    .hero-cover {{
+      min-height: 420px;
+      border-radius: 28px;
+      overflow: hidden;
+      box-shadow: 0 18px 42px rgba(0,0,0,.24);
+      background: #0f172a;
+    }}
+    .hero-cover img {{
       width: 100%;
-      border-radius: 24px;
+      height: 100%;
+      object-fit: cover;
       display: block;
-      box-shadow: 0 16px 40px rgba(15,23,42,.12);
     }}
-    .headline {{
-      margin-top: 26px;
-      background: #fff;
-      border-radius: 22px;
-      padding: 28px 26px;
-      box-shadow: 0 8px 24px rgba(15,23,42,.06);
+    .hero-panel {{
+      background: linear-gradient(180deg, rgba(17,24,39,.95), rgba(15,23,42,.98));
+      border: 1px solid rgba(148,163,184,.15);
+      border-radius: 28px;
+      padding: 26px;
+      box-shadow: 0 18px 42px rgba(0,0,0,.18);
     }}
-    .headline h1 {{
-      margin: 0;
-      font-size: 38px;
-      line-height: 1.28;
-      letter-spacing: -0.02em;
+    .eyebrow {{
+      color: #7dd3fc;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
     }}
-    .sub {{
+    h1 {{
+      margin: 12px 0 0;
+      font-size: 40px;
+      line-height: 1.2;
+      letter-spacing: -0.03em;
+      color: #fff;
+    }}
+    .subtitle {{
       margin-top: 12px;
+      color: #cbd5e1;
       font-size: 18px;
-      color: #475569;
     }}
     .deck {{
       margin-top: 18px;
-      font-size: 19px;
-      color: #1f2937;
+      color: #e2e8f0;
+      font-size: 18px;
     }}
-    .grid {{
+    .tag-row {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }}
+    .tag {{
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: rgba(59,130,246,.16);
+      border: 1px solid rgba(125,211,252,.18);
+      color: #dbeafe;
+      font-size: 13px;
+      font-weight: 600;
+    }}
+    .split {{
       display: grid;
       grid-template-columns: 1.3fr 0.9fr;
       gap: 18px;
       margin-top: 18px;
     }}
     .card {{
-      background: #fff;
-      border-radius: 20px;
-      padding: 22px 22px;
-      box-shadow: 0 8px 24px rgba(15,23,42,.06);
+      background: #0f172a;
+      border: 1px solid rgba(148,163,184,.14);
+      border-radius: 24px;
+      padding: 22px;
+      box-shadow: 0 10px 28px rgba(0,0,0,.15);
     }}
     .card h2 {{
       margin: 0 0 14px;
       font-size: 22px;
+      color: #fff;
     }}
     .summary-list {{
       margin: 0;
-      padding-left: 20px;
+      padding-left: 18px;
     }}
     .summary-list li {{
-      margin-bottom: 10px;
+      margin-bottom: 12px;
       font-size: 17px;
+      color: #dbe7f5;
+    }}
+    .meta-block {{
+      display: grid;
+      gap: 14px;
+    }}
+    .meta-item {{
+      padding: 16px;
+      border-radius: 18px;
+      background: rgba(2,6,23,.35);
+      border: 1px solid rgba(148,163,184,.12);
+    }}
+    .meta-label {{
+      font-size: 12px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: #7dd3fc;
+      margin-bottom: 8px;
+      font-weight: 700;
+    }}
+    .meta-value {{
+      color: #e5edf7;
+      font-size: 16px;
+    }}
+    .story-grid {{
+      display: grid;
+      grid-template-columns: 1.12fr 0.88fr;
+      gap: 18px;
+      margin-top: 18px;
     }}
     .story p {{
       margin: 0 0 16px;
       font-size: 18px;
-      color: #1f2937;
+      color: #dbe7f5;
+    }}
+    .inline-visual {{
+      border-radius: 22px;
+      overflow: hidden;
+      min-height: 300px;
+      background: #111827;
+      border: 1px solid rgba(148,163,184,.14);
+    }}
+    .inline-visual img {{
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
     }}
     .outlook-grid {{
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 14px;
-      margin-top: 18px;
+      margin-top: 14px;
     }}
     .mini {{
-      background: #f8fafc;
-      border: 1px solid #e5e7eb;
-      border-radius: 16px;
+      background: rgba(2,6,23,.35);
+      border: 1px solid rgba(148,163,184,.12);
+      border-radius: 18px;
       padding: 16px;
     }}
     .mini h3 {{
       margin: 0 0 10px;
-      font-size: 17px;
+      color: #fff;
+      font-size: 18px;
     }}
     .watch-grid {{
       display: grid;
@@ -334,9 +538,9 @@ def build_html_report(data: dict) -> str:
       gap: 14px;
     }}
     .asset-card {{
-      background: #f8fafc;
-      border: 1px solid #e5e7eb;
-      border-radius: 16px;
+      background: rgba(2,6,23,.35);
+      border: 1px solid rgba(148,163,184,.12);
+      border-radius: 18px;
       padding: 16px;
     }}
     .asset-top {{
@@ -348,6 +552,7 @@ def build_html_report(data: dict) -> str:
     .asset-name {{
       font-size: 18px;
       font-weight: 700;
+      color: #fff;
     }}
     .badge {{
       border-radius: 999px;
@@ -368,58 +573,101 @@ def build_html_report(data: dict) -> str:
       color: #374151;
     }}
     .asset-reason {{
-      color: #475569;
+      color: #cbd5e1;
       font-size: 15px;
     }}
-    .risk {{
-      background: #fff7ed;
-      border: 1px solid #fed7aa;
+    .gallery {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+      margin-top: 14px;
     }}
-    @media (max-width: 760px) {{
-      .grid {{
+    .gallery-item {{
+      border-radius: 20px;
+      overflow: hidden;
+      min-height: 220px;
+      background: #111827;
+      border: 1px solid rgba(148,163,184,.14);
+    }}
+    .gallery-item img {{
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }}
+    .risk {{
+      background: linear-gradient(180deg, rgba(127,29,29,.28), rgba(69,10,10,.24));
+      border: 1px solid rgba(252,165,165,.2);
+    }}
+    @media (max-width: 900px) {{
+      .hero, .split, .story-grid {{
         grid-template-columns: 1fr;
       }}
       .outlook-grid {{
         grid-template-columns: 1fr;
       }}
-      .headline h1 {{
-        font-size: 30px;
-      }}
-      .deck {{
-        font-size: 17px;
+      h1 {{
+        font-size: 32px;
       }}
     }}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <img class="hero-image" src="cover.png" alt="cover">
+  <div class="shell">
 
-    <section class="headline">
-      <h1>{title}</h1>
-      <div class="sub">{subtitle}</div>
-      <div class="deck">{deck}</div>
-    </section>
-
-    <section class="grid">
-      <div class="card">
-        <h2>这篇资讯最值得看的三点</h2>
-        <ul class="summary-list">
-          {key_points_html}
-        </ul>
+    <section class="hero">
+      <div class="hero-cover">
+        <img src="cover.png" alt="cover">
       </div>
-
-      <div class="card">
-        <h2>市场在看什么</h2>
-        <div class="story">
-          <p>{why_now}</p>
+      <div class="hero-panel">
+        <div class="eyebrow">MARKET INTELLIGENCE</div>
+        <h1>{title}</h1>
+        <div class="subtitle">{subtitle}</div>
+        <div class="deck">{deck}</div>
+        <div class="tag-row">
+          <div class="tag">全球风险</div>
+          <div class="tag">市场冲击</div>
+          <div class="tag">短期观察</div>
         </div>
       </div>
     </section>
 
-    <section class="card story">
-      <h2>为什么这件事会牵动市场</h2>
-      <p>{market_impact}</p>
+    <section class="split">
+      <div class="card">
+        <h2>三点看懂这条资讯</h2>
+        <ul class="summary-list">
+          {key_points_html}
+        </ul>
+      </div>
+      <div class="card">
+        <h2>为什么现在重要</h2>
+        <div class="meta-block">
+          <div class="meta-item">
+            <div class="meta-label">Now in focus</div>
+            <div class="meta-value">{why_now}</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">Time window</div>
+            <div class="meta-value">重点观察未来 1 到 7 天的市场反应与风险偏好变化。</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="story-grid">
+      <div class="card story">
+        <h2>发生了什么</h2>
+        <p>{what_happened}</p>
+      </div>
+      {image_block_1 if image_block_1 else '<div class="card story"><h2>现场画面</h2><p>当前未抓取到原文配图，系统已使用自动封面图作为视觉补充。</p></div>'}
+    </section>
+
+    <section class="story-grid">
+      <div class="card story">
+        <h2>这对市场意味着什么</h2>
+        <p>{market_impact}</p>
+      </div>
+      {image_block_2 if image_block_2 else '<div class="card story"><h2>进一步观察</h2><p>后续如果接入真实新闻源，页面会优先展示原文中的头图、正文图与图表类图片。</p></div>'}
     </section>
 
     <section class="card">
@@ -447,6 +695,13 @@ def build_html_report(data: dict) -> str:
       </div>
     </section>
 
+    <section class="card">
+      <h2>资讯图片</h2>
+      <div class="gallery">
+        {gallery_html if gallery_html else '<div class="gallery-item"><img src="cover.png" alt="fallback cover"></div>'}
+      </div>
+    </section>
+
     <section class="card risk">
       <h2>还要留意什么变量</h2>
       <div>{risk_warning}</div>
@@ -467,7 +722,7 @@ def save_html_report(html: str, filename: str = REPORT_HTML_FILE) -> str:
 def save_report_meta(data: dict, filename: str = REPORT_META_FILE) -> str:
     meta = {
         "title": data.get("title", "市场快讯"),
-        "description": data.get("deck", data.get("description", "暂无摘要")),
+        "description": data.get("deck", "暂无摘要"),
         "url": REPORT_URL,
         "picurl": DEFAULT_PIC_URL
     }
@@ -522,14 +777,16 @@ def generate_report():
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
     generate_cover_image(data, COVER_FILE)
-    html = build_html_report(data)
+    source_images = fetch_article_images(SOURCE_ARTICLE_URL, max_images=3) if SOURCE_ARTICLE_URL else []
 
+    html = build_html_report(data, source_images)
     save_html_report(html)
     save_report_meta(data)
 
     print(f"已生成 HTML 报告：{REPORT_HTML_FILE}")
     print(f"已生成封面图：{COVER_FILE}")
     print(f"已生成报告元数据：{REPORT_META_FILE}")
+    print(f"已抓取原文图片：{source_images}")
 
 
 def push_existing_report():
@@ -547,6 +804,7 @@ def push_existing_report():
 
 
 def main():
+    ensure_dir(IMAGES_DIR)
     generate_report()
 
     if PUSH_TO_WECOM:
