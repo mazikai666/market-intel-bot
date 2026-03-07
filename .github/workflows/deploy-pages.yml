@@ -17,6 +17,9 @@ concurrency:
 
 jobs:
   deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
 
     steps:
@@ -42,10 +45,14 @@ jobs:
           mkdir -p _site
           cp report.html _site/index.html
 
+      - name: 配置 GitHub Pages
+        uses: actions/configure-pages@v5
+
       - name: 上传 Pages 产物
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
       - name: 发布到 GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
