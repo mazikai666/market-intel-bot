@@ -9,11 +9,12 @@ WECOM_WEBHOOK = os.getenv("WECOM_WEBHOOK")
 
 TEST_NEWS = "中东局势升级，市场避险情绪上升，原油和黄金上涨，纳指期货走弱。"
 
-# 你自己的 GitHub Pages 链接
-DEFAULT_REPORT_URL = "https://mazikai666.github.io/market-intel-bot/"
+REPORT_URL = os.getenv("REPORT_URL", "https://mazikai666.github.io/market-intel-bot/")
+DEFAULT_PIC_URL = os.getenv("DEFAULT_PIC_URL", "https://picsum.photos/900/500")
+PUSH_TO_WECOM = os.getenv("PUSH_TO_WECOM", "false").lower() == "true"
 
-# 先用一个通用封面图，后面可以再换成你自己的
-DEFAULT_PIC_URL = "https://picsum.photos/900/500"
+REPORT_HTML_FILE = "report.html"
+REPORT_META_FILE = "report_meta.json"
 
 
 def extract_json_from_text(content: str) -> dict:
@@ -36,7 +37,6 @@ def extract_json_from_text(content: str) -> dict:
         raise ValueError(f"无法从 DeepSeek 返回中提取 JSON：{content}")
 
     json_text = content[start:end + 1]
-
     print("清洗后的 JSON 文本：")
     print(json_text)
 
@@ -55,14 +55,15 @@ def call_deepseek(news_text: str) -> dict:
 
     prompt = f"""
 你是一个专业的市场情报编辑。
-请基于下面这条新闻，生成一个适合“企业微信图文消息”的内容。
+请基于下面这条新闻，生成一个适合“企业微信图文消息 + 网页分析报告”的内容。
 
 要求：
-1. 不要写成公告，不要写成长文
-2. 要像财经快讯卡片，简洁、抓眼球、舒服
-3. 结论要基于“事件 -> 原因 -> 市场影响”
+1. 不要写成公告，不要写成长文堆砌
+2. 图文卡片摘要要简洁、抓眼球、舒服
+3. 完整报告要强调：事件 -> 缘由 -> 市场传导 -> 结论 -> 风险
 4. 不要写太空泛的话
-5. 严格输出 JSON，不要输出任何额外内容
+5. 避免“必然”“一定”这类过度武断表达
+6. 严格输出 JSON，不要输出任何额外内容
 
 新闻：
 {news_text}
@@ -70,15 +71,15 @@ def call_deepseek(news_text: str) -> dict:
 请输出：
 {{
   "title": "20字以内，像财经快讯标题",
-  "description": "80到120字，读起来像专业市场快讯摘要，要包含发生了什么、为什么重要、影响了什么资产",
+  "description": "80到120字，适合企业微信图文卡片摘要，要包含发生了什么、为什么重要、影响了什么资产",
   "report_title": "完整分析页面的大标题",
-  "event_summary": "完整分析：事件概述",
-  "background_reason": "完整分析：事情缘由",
-  "market_logic": "完整分析：市场传导逻辑",
-  "impact_1d": "完整分析：1天判断",
-  "impact_3d": "完整分析：3天判断",
-  "impact_7d": "完整分析：7天判断",
-  "risk_warning": "完整分析：风险提示"
+  "event_summary": "事件概述，2到3句",
+  "background_reason": "事情缘由与背景，说明为什么这件事值得市场关注",
+  "market_logic": "市场传导逻辑，讲清楚因果链",
+  "impact_1d": "未来1天影响判断",
+  "impact_3d": "未来3天影响判断",
+  "impact_7d": "未来7天影响判断",
+  "risk_warning": "风险提示"
 }}
 """
 
@@ -227,10 +228,27 @@ def build_html_report(data: dict) -> str:
     return html
 
 
-def save_html_report(html: str, filename: str = "report.html") -> str:
+def save_html_report(html: str, filename: str = REPORT_HTML_FILE) -> str:
     with open(filename, "w", encoding="utf-8") as f:
         f.write(html)
     return filename
+
+
+def save_report_meta(data: dict, filename: str = REPORT_META_FILE) -> str:
+    meta = {
+        "title": data.get("title", "市场快讯"),
+        "description": data.get("description", "暂无摘要"),
+        "url": REPORT_URL,
+        "picurl": DEFAULT_PIC_URL
+    }
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+    return filename
+
+
+def load_report_meta(filename: str = REPORT_META_FILE) -> dict:
+    with open(filename, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def push_news_to_wecom(title: str, description: str, url: str, picurl: str, max_retries: int = 3) -> str:
@@ -267,27 +285,42 @@ def push_news_to_wecom(title: str, description: str, url: str, picurl: str, max_
     raise last_error
 
 
-def main():
+def generate_report():
     print("开始调用 DeepSeek...")
     data = call_deepseek(TEST_NEWS)
     print("DeepSeek 解析后的结果：")
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
     html = build_html_report(data)
-    filename = save_html_report(html)
-    print(f"已生成 HTML 报告：{filename}")
+    html_file = save_html_report(html)
+    meta_file = save_report_meta(data)
 
-    title = data.get("title", "市场快讯")
-    description = data.get("description", "暂无摘要")
+    print(f"已生成 HTML 报告：{html_file}")
+    print(f"已生成报告元数据：{meta_file}")
 
-    print("开始发送企业微信图文消息...")
+
+def push_existing_report():
+    meta = load_report_meta()
+    print("读取 report_meta.json：")
+    print(json.dumps(meta, ensure_ascii=False, indent=2))
+
     result = push_news_to_wecom(
-        title=title,
-        description=description,
-        url=DEFAULT_REPORT_URL,
-        picurl=DEFAULT_PIC_URL,
+        title=meta["title"],
+        description=meta["description"],
+        url=meta["url"],
+        picurl=meta["picurl"],
     )
     print("推送结果：", result)
+
+
+def main():
+    generate_report()
+
+    if PUSH_TO_WECOM:
+        print("开始发送企业微信图文消息...")
+        push_existing_report()
+    else:
+        print("当前只生成报告，不推送企业微信。")
 
 
 if __name__ == "__main__":
