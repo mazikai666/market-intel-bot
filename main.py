@@ -18,7 +18,7 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 WECOM_WEBHOOK = os.getenv("WECOM_WEBHOOK")
 
 REPORT_URL = os.getenv("REPORT_URL", "https://mazikai666.github.io/market-intel-bot/")
-DEFAULT_PIC_URL = os.getenv("DEFAULT_PIC_URL", REPORT_URL + "cover.png")
+DEFAULT_PIC_URL = os.getenv("DEFAULT_PIC_URL", REPORT_URL + "cover.jpg")
 PUSH_TO_WECOM = os.getenv("PUSH_TO_WECOM", "false").lower() == "true"
 
 TEST_NEWS = os.getenv("TEST_NEWS", "").strip()
@@ -26,15 +26,35 @@ SOURCE_ARTICLE_URL = os.getenv("SOURCE_ARTICLE_URL", "").strip()
 
 REPORT_HTML_FILE = "report.html"
 REPORT_META_FILE = "report_meta.json"
-COVER_FILE = "cover.png"
+COVER_FILE = "cover.jpg"
 IMAGES_DIR = "images"
 
 
 CATEGORY_META = {
-    "breaking": {"label": "全球突发", "prefix": "【全球突发】", "theme": "Breaking Desk", "color": "#b91c1c"},
-    "market": {"label": "市场金融", "prefix": "【市场快讯】", "theme": "Market Pulse", "color": "#1d4ed8"},
-    "tech": {"label": "科技突破", "prefix": "【科技情报】", "theme": "Tech Watch", "color": "#7c3aed"},
-    "business": {"label": "公司商业", "prefix": "【商业动态】", "theme": "Business Brief", "color": "#0f766e"},
+    "breaking": {
+        "label": "全球突发",
+        "prefix": "【全球突发】",
+        "theme": "Breaking Desk",
+        "color": "#b91c1c",
+    },
+    "market": {
+        "label": "市场金融",
+        "prefix": "【市场快讯】",
+        "theme": "Market Pulse",
+        "color": "#1d4ed8",
+    },
+    "tech": {
+        "label": "科技突破",
+        "prefix": "【科技情报】",
+        "theme": "Tech Watch",
+        "color": "#7c3aed",
+    },
+    "business": {
+        "label": "公司商业",
+        "prefix": "【商业动态】",
+        "theme": "Business Brief",
+        "color": "#0f766e",
+    },
 }
 
 
@@ -78,7 +98,7 @@ def _safe_font(size: int, bold: bool = False):
 def choose_news() -> dict:
     if TEST_NEWS:
         return {
-            "title": TEST_NEWS[:80],
+            "title": TEST_NEWS[:120],
             "description": TEST_NEWS,
             "link": SOURCE_ARTICLE_URL,
             "source": "Manual Input",
@@ -129,7 +149,8 @@ def call_deepseek(news_item: dict) -> dict:
 2. 不要千篇一律
 3. 页面内容要丰富，包含背景、时间线、全球影响、关键观察点、来源信息
 4. 语言专业、克制、有信息密度
-5. 严格输出 JSON
+5. 标题和导语要更像成熟媒体，而不是模板句
+6. 严格输出 JSON
 
 新闻：
 {news_text}
@@ -250,7 +271,7 @@ def generate_cover_image(data: dict, filename: str = COVER_FILE) -> str:
         draw.text((tag_x + 18, tag_y + 12), tag, font=tag_font, fill="#e5e7eb")
         tag_x += box_w + 18
 
-    img.save(filename, format="PNG")
+    img.save(filename, format="JPEG", quality=92)
     return filename
 
 
@@ -286,7 +307,7 @@ def download_image(url: str, out_path: str, timeout: int = 25) -> bool:
         return False
 
 
-def fetch_article_images(article_url: str, max_images: int = 3) -> list[str]:
+def fetch_article_images(article_url: str, max_images: int = 4) -> list[str]:
     if not article_url:
         return []
 
@@ -339,6 +360,21 @@ def fetch_article_images(article_url: str, max_images: int = 3) -> list[str]:
             saved.append(out_path)
 
     return saved
+
+
+def choose_cover_image(source_images: list[str], generated_cover: str = COVER_FILE) -> str:
+    if source_images:
+        first_img = source_images[0]
+        try:
+            with Image.open(first_img) as img:
+                img = img.convert("RGB")
+                img.save(COVER_FILE, format="JPEG", quality=92)
+            print(f"使用原文图片作为封面：{first_img}")
+            return COVER_FILE
+        except Exception as e:
+            print(f"使用原文图作为封面失败，退回自动封面：{e}")
+
+    return generated_cover
 
 
 def render_watch_cards(watchlist: list[dict]) -> str:
@@ -432,22 +468,26 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
 
     normalized_images = [escape(p.replace(os.sep, "/")) for p in source_images]
 
-    if len(normalized_images) >= 1:
-        image_block_1 = f'<div class="inline-visual"><img src="{normalized_images[0]}" alt="source image 1"></div>'
-    else:
-        image_block_1 = '<div class="card story"><h2>现场线索</h2><p>当前未抓取到可用原图，建议改用具体文章页而不是频道页。</p></div>'
+    # 第1张图用于封面，不再重复显示
+    body_images = normalized_images[1:] if len(normalized_images) > 1 else []
 
-    if len(normalized_images) >= 2:
-        image_block_2 = f'<div class="inline-visual"><img src="{normalized_images[1]}" alt="source image 2"></div>'
+    if len(body_images) >= 1:
+        image_block_1 = f'<div class="inline-visual"><img src="{body_images[0]}" alt="source image 1"></div>'
     else:
-        image_block_2 = '<div class="card story"><h2>进一步观察</h2><p>如果换成具体原文链接，系统会优先展示正文头图与大图。</p></div>'
+        image_block_1 = '<div class="card story"><h2>现场线索</h2><p>当前未抓取到更多可用原图，建议改用具体文章页而不是频道页。</p></div>'
+
+    image_block_2 = '<div class="card story"><h2>进一步观察</h2><p>系统已优先使用原文头图作为封面，其余原图会按价值择优展示。</p></div>'
 
     gallery_section = ""
-    if normalized_images:
-        gallery_items = "".join(f'<div class="gallery-item"><img src="{rel}" alt="source image"></div>' for rel in normalized_images)
+    gallery_images = body_images[1:] if len(body_images) > 1 else []
+    if gallery_images:
+        gallery_items = "".join(
+            f'<div class="gallery-item"><img src="{rel}" alt="source image"></div>'
+            for rel in gallery_images
+        )
         gallery_section = f"""
         <section class="card">
-          <h2>资讯图片</h2>
+          <h2>更多图片</h2>
           <div class="gallery">
             {gallery_items}
           </div>
@@ -518,7 +558,7 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
 <body>
   <div class="shell">
     <section class="hero">
-      <div class="hero-cover"><img src="cover.png" alt="cover"></div>
+      <div class="hero-cover"><img src="cover.jpg" alt="cover"></div>
       <div class="hero-panel">
         <div class="eyebrow">GLOBAL INTELLIGENCE DESK</div>
         <div class="category-pill">{escape(meta["label"])}</div>
@@ -642,9 +682,14 @@ def generate_report():
     news_item = choose_news()
     data = call_deepseek(news_item)
 
+    # 先生成默认封面
     generate_cover_image(data, COVER_FILE)
+
     article_url = SOURCE_ARTICLE_URL or news_item.get("link", "")
-    source_images = fetch_article_images(article_url, max_images=3) if article_url else []
+    source_images = fetch_article_images(article_url, max_images=4) if article_url else []
+
+    # 优先使用原文第一张图做封面
+    choose_cover_image(source_images, COVER_FILE)
 
     html = build_html_report(data, source_images)
     save_html_report(html)
