@@ -6,7 +6,7 @@ on:
     - cron: "*/30 * * * *"
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -24,23 +24,33 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      - name: Ensure state file exists
+        run: |
+          if [ ! -f state.json ]; then
+            echo '{"sent_links":[]}' > state.json
+          fi
+          cat state.json
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate report
+      - name: Generate report and push
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           REPORT_URL: https://mazikai666.github.io/market-intel-bot/
           DEFAULT_PIC_URL: https://mazikai666.github.io/market-intel-bot/cover.jpg
-          PUSH_TO_WECOM: "false"
+          PUSH_TO_WECOM: "true"
           TEST_NEWS: ""
           SOURCE_ARTICLE_URL: ""
         run: python main.py
@@ -56,6 +66,8 @@ jobs:
           ls -la images || true
           echo "==== report_meta.json ===="
           cat report_meta.json || true
+          echo "==== state.json ===="
+          cat state.json || true
 
       - name: Prepare Pages files
         run: |
@@ -76,47 +88,14 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Push to WeCom
-        env:
-          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+      - name: Commit updated state
         run: |
-          python - <<'PY'
-          import json
-          import os
-          import time
-          import requests
-
-          with open("report_meta.json", "r", encoding="utf-8") as f:
-              meta = json.load(f)
-
-          webhook = os.environ["WECOM_WEBHOOK"]
-
-          payload = {
-              "msgtype": "news",
-              "news": {
-                  "articles": [
-                      {
-                          "title": meta["title"],
-                          "description": meta["description"],
-                          "url": meta["url"],
-                          "picurl": meta["picurl"]
-                      }
-                  ]
-              }
-          }
-
-          last_error = None
-          for i in range(3):
-              try:
-                  print(f"企业微信图文推送尝试第 {i+1} 次...")
-                  resp = requests.post(webhook, json=payload, timeout=20)
-                  resp.raise_for_status()
-                  print("企业微信返回：", resp.text)
-                  break
-              except Exception as e:
-                  last_error = e
-                  print(f"第 {i+1} 次图文推送失败：{e}")
-                  time.sleep(5)
-          else:
-              raise last_error
-          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          if git diff --cached --quiet; then
+            echo "No state changes to commit"
+          else
+            git commit -m "Update pushed news state"
+            git push
+          fi
