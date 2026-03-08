@@ -3,7 +3,7 @@ import re
 
 def normalize_title(title: str) -> str:
     title = title.lower().strip()
-    title = re.sub(r"[^a-z0-9\u4e00-\u9fff\s]", " ", title)
+    title = re.sub(r"[^a-z0-9\s]", " ", title)
     title = re.sub(r"\s+", " ", title)
     return title
 
@@ -28,24 +28,36 @@ def score_news(item: dict) -> int:
     text = f"{title} {desc}"
 
     keywords = {
-        "war": 10,
-        "strike": 9,
-        "attack": 9,
-        "sanctions": 8,
-        "fed": 9,
-        "inflation": 8,
-        "rate": 7,
-        "bitcoin": 7,
-        "crypto": 6,
-        "ai": 7,
-        "nvidia": 6,
-        "merger": 7,
-        "earnings": 6,
-        "oil": 8,
-        "gold": 7,
-        "china": 5,
-        "russia": 6,
-        "middle east": 8,
+        "war": 12,
+        "attack": 11,
+        "strike": 10,
+        "missile": 10,
+        "military": 9,
+        "sanctions": 9,
+        "ceasefire": 8,
+        "fed": 10,
+        "inflation": 9,
+        "interest rate": 9,
+        "tariff": 8,
+        "oil": 9,
+        "gold": 8,
+        "bitcoin": 8,
+        "crypto": 7,
+        "ai": 8,
+        "chip": 7,
+        "nvidia": 7,
+        "openai": 7,
+        "merger": 8,
+        "acquisition": 8,
+        "earnings": 7,
+        "bank": 7,
+        "recession": 9,
+        "china": 6,
+        "russia": 7,
+        "ukraine": 8,
+        "middle east": 9,
+        "iran": 8,
+        "israel": 8,
     }
 
     score = 0
@@ -54,9 +66,11 @@ def score_news(item: dict) -> int:
             score += pts
 
     if item.get("category_hint") == "breaking":
-        score += 5
+        score += 4
     if item.get("category_hint") == "market":
         score += 3
+    if item.get("category_hint") == "tech":
+        score += 2
 
     return score
 
