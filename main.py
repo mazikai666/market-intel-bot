@@ -30,6 +30,34 @@ COVER_FILE = "cover.png"
 IMAGES_DIR = "images"
 
 
+CATEGORY_META = {
+    "breaking": {
+        "label": "全球突发",
+        "prefix": "【全球突发】",
+        "theme": "Breaking Desk",
+        "color": "#b91c1c",
+    },
+    "market": {
+        "label": "市场金融",
+        "prefix": "【市场快讯】",
+        "theme": "Market Pulse",
+        "color": "#1d4ed8",
+    },
+    "tech": {
+        "label": "科技突破",
+        "prefix": "【科技情报】",
+        "theme": "Tech Watch",
+        "color": "#7c3aed",
+    },
+    "business": {
+        "label": "公司商业",
+        "prefix": "【商业动态】",
+        "theme": "Business Brief",
+        "color": "#0f766e",
+    },
+}
+
+
 def ensure_dir(path: str):
     os.makedirs(path, exist_ok=True)
 
@@ -59,88 +87,6 @@ def extract_json_from_text(content: str) -> dict:
     return json.loads(json_text)
 
 
-def call_deepseek(news_text: str) -> dict:
-    if not DEEPSEEK_API_KEY:
-        raise ValueError("没有找到 DEEPSEEK_API_KEY，请先在 GitHub Secrets 里配置。")
-
-    url = "https://api.deepseek.com/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    prompt = f"""
-你是一个专业财经媒体编辑。
-请基于下面这条新闻，生成一篇“像高质量国际资讯产品”的专题页素材。
-
-要求：
-1. 写法像资讯，不要像 AI 报告
-2. 页面节奏要适合图文专题页
-3. 强调：发生了什么、为什么现在值得关注、对哪些市场与资产影响最大
-4. 语言专业、克制、有信息密度
-5. 不要写成套话，不要出现“事件概述”“事情缘由”这种机械标题
-6. 避免“必然、一定、注定”这类武断词
-7. 严格输出 JSON，不要输出任何额外文字
-
-新闻：
-{news_text}
-
-请输出：
-{{
-  "title": "更像媒体标题，18字以内",
-  "subtitle": "一句副标题，点出市场主线",
-  "deck": "导语，2到3句，像媒体开头摘要",
-  "key_points": [
-    "重点1",
-    "重点2",
-    "重点3"
-  ],
-  "why_now": "为什么这件事现在值得关注",
-  "what_happened": "发生了什么，写成资讯正文风格的一段",
-  "market_impact": "这件事对市场意味着什么，写成资讯正文风格的一段",
-  "outlook_1d": "未来1天",
-  "outlook_3d": "未来3天",
-  "outlook_7d": "未来7天",
-  "watchlist": [
-    {{"name": "黄金", "view": "偏多", "reason": "一句原因"}},
-    {{"name": "原油", "view": "偏多", "reason": "一句原因"}},
-    {{"name": "纳指期货", "view": "偏空", "reason": "一句原因"}}
-  ],
-  "risk_warning": "一句风险提示",
-  "cover": {{
-    "theme": "封面主题，如 地缘风险 / AI突破 / 美联储观察",
-    "strapline": "封面小字，12字以内",
-    "tags": ["标签1", "标签2", "标签3"]
-  }}
-}}
-"""
-
-    data = {
-        "model": "deepseek-chat",
-        "messages": [
-            {
-                "role": "system",
-                "content": "你是一个严格输出 JSON 的财经资讯编辑。只返回 JSON 对象本身。"
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        "temperature": 0.6,
-        "response_format": {"type": "json_object"}
-    }
-
-    resp = requests.post(url, headers=headers, json=data, timeout=90)
-    resp.raise_for_status()
-    result = resp.json()
-
-    content = result["choices"][0]["message"]["content"]
-    print("DeepSeek 原始返回：")
-    print(repr(content))
-    return extract_json_from_text(content)
-
-
 def _safe_font(size: int, bold: bool = False):
     candidates = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -152,45 +98,148 @@ def _safe_font(size: int, bold: bool = False):
     return ImageFont.load_default()
 
 
+def call_deepseek(news_text: str) -> dict:
+    if not DEEPSEEK_API_KEY:
+        raise ValueError("没有找到 DEEPSEEK_API_KEY，请先在 GitHub Secrets 里配置。")
+
+    url = "https://api.deepseek.com/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    prompt = f"""
+你是一个全球资讯编辑台的总编。
+请先判断下面这条新闻属于哪一类，再按对应媒体风格生成专题页素材。
+
+可选分类只有四种：
+- breaking：全球突发（战争、冲突、灾害、重大政策、国际局势）
+- market：市场金融（股市、债市、原油、黄金、加密、宏观数据）
+- tech：科技突破（AI、芯片、生物医药、太空、能源技术）
+- business：公司商业（财报、CEO变动、并购、产品发布、行业竞争）
+
+要求：
+1. 先分类，再写作
+2. 不要千篇一律
+3. 不同分类的写法要明显不同
+4. breaking 要像国际新闻快讯
+5. market 要像市场晨报/交易简报
+6. tech 要像科技媒体深读
+7. business 要像商业媒体报道
+8. 语言专业、克制、有信息密度
+9. 严格输出 JSON，不要输出任何额外文字
+
+新闻：
+{news_text}
+
+请输出：
+{{
+  "category": "breaking 或 market 或 tech 或 business",
+  "title": "标题，18字以内",
+  "subtitle": "一句副标题，点出主线",
+  "deck": "导语，2到3句，像媒体开头摘要",
+  "key_points": [
+    "重点1",
+    "重点2",
+    "重点3"
+  ],
+  "why_now": "为什么现在值得关注",
+  "section_1_title": "第一部分标题",
+  "section_1_body": "第一部分正文，一段",
+  "section_2_title": "第二部分标题",
+  "section_2_body": "第二部分正文，一段",
+  "outlook_1d": "未来1天/短期观察",
+  "outlook_3d": "未来3天/中短期观察",
+  "outlook_7d": "未来7天/一周观察",
+  "watchlist": [
+    {{"name": "对象1", "view": "偏多/偏空/关注/中性", "reason": "一句原因"}},
+    {{"name": "对象2", "view": "偏多/偏空/关注/中性", "reason": "一句原因"}},
+    {{"name": "对象3", "view": "偏多/偏空/关注/中性", "reason": "一句原因"}}
+  ],
+  "risk_warning": "一句风险提示",
+  "cover": {{
+    "theme": "封面主题",
+    "strapline": "封面小字，12字以内",
+    "tags": ["标签1", "标签2", "标签3"]
+  }}
+}}
+"""
+
+    data = {
+        "model": "deepseek-chat",
+        "messages": [
+            {
+                "role": "system",
+                "content": "你是一个严格输出 JSON 的全球资讯总编。只返回 JSON 对象本身。"
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "temperature": 0.7,
+        "response_format": {"type": "json_object"}
+    }
+
+    resp = requests.post(url, headers=headers, json=data, timeout=90)
+    resp.raise_for_status()
+    result = resp.json()
+
+    content = result["choices"][0]["message"]["content"]
+    print("DeepSeek 原始返回：")
+    print(repr(content))
+    parsed = extract_json_from_text(content)
+
+    category = parsed.get("category", "breaking")
+    if category not in CATEGORY_META:
+        parsed["category"] = "breaking"
+
+    return parsed
+
+
 def generate_cover_image(data: dict, filename: str = COVER_FILE) -> str:
-    title = data.get("title", "市场情报")
+    category = data.get("category", "breaking")
+    meta = CATEGORY_META.get(category, CATEGORY_META["breaking"])
+
+    title = data.get("title", "全球情报")
     subtitle = data.get("subtitle", "")
     cover = data.get("cover", {})
-    strapline = cover.get("strapline", "Market Intel")
-    theme = cover.get("theme", "市场快讯")
+    strapline = cover.get("strapline", meta["theme"])
+    theme = cover.get("theme", meta["label"])
     tags = cover.get("tags", [])[:3]
+    accent = meta["color"]
 
     width, height = 1600, 900
     img = Image.new("RGB", (width, height), "#07111f")
     draw = ImageDraw.Draw(img)
 
     draw.rectangle([0, 0, width, height], fill="#07111f")
-    draw.ellipse([980, -120, 1700, 560], fill="#143a7b")
+    draw.ellipse([980, -120, 1700, 560], fill=accent)
     draw.ellipse([-250, 470, 520, 1200], fill="#0f2348")
     draw.rounded_rectangle([65, 65, width - 65, height - 65], radius=38, outline="#27406e", width=2)
 
-    draw.rounded_rectangle([90, 110, 290, 142], radius=12, fill="#1d4ed8")
-    draw.rounded_rectangle([306, 110, 520, 142], radius=12, fill="#1f2937")
+    draw.rounded_rectangle([90, 110, 310, 142], radius=12, fill=accent)
+    draw.rounded_rectangle([326, 110, 560, 142], radius=12, fill="#1f2937")
 
-    title_font = _safe_font(76, bold=True)
+    title_font = _safe_font(74, bold=True)
     subtitle_font = _safe_font(30, bold=False)
     strap_font = _safe_font(26, bold=True)
     theme_font = _safe_font(28, bold=True)
     tag_font = _safe_font(24, bold=True)
 
-    draw.text((100, 180), strapline, font=strap_font, fill="#93c5fd")
+    draw.text((100, 180), strapline, font=strap_font, fill="#cfe4ff")
     draw.text((100, 228), theme, font=theme_font, fill="#ffffff")
 
     wrapped_title = textwrap.wrap(title, width=12)
     y = 328
     for line in wrapped_title[:3]:
         draw.text((100, y), line, font=title_font, fill="#ffffff")
-        y += 98
+        y += 96
 
     wrapped_sub = textwrap.wrap(subtitle, width=34)
-    y += 6
+    y += 10
     for line in wrapped_sub[:2]:
-        draw.text((100, y), line, font=subtitle_font, fill="#cbd5e1")
+        draw.text((100, y), line, font=subtitle_font, fill="#d1d5db")
         y += 44
 
     tag_x = 100
@@ -202,9 +251,9 @@ def generate_cover_image(data: dict, filename: str = COVER_FILE) -> str:
         tag_x += box_w + 18
 
     points = [(980, 640), (1060, 600), (1140, 620), (1230, 520), (1320, 560), (1400, 470), (1490, 510)]
-    draw.line(points, fill="#60a5fa", width=8)
+    draw.line(points, fill="#93c5fd", width=8)
     for p in points:
-        draw.ellipse([p[0] - 8, p[1] - 8, p[0] + 8, p[1] + 8], fill="#bfdbfe")
+        draw.ellipse([p[0] - 8, p[1] - 8, p[0] + 8, p[1] + 8], fill="#dbeafe")
 
     img.save(filename, format="PNG")
     return filename
@@ -300,29 +349,14 @@ def fetch_article_images(article_url: str, max_images: int = 3) -> list[str]:
     return saved
 
 
-def build_html_report(data: dict, source_images: list[str]) -> str:
-    title = escape(data.get("title", "市场情报"))
-    subtitle = escape(data.get("subtitle", ""))
-    deck = escape(data.get("deck", ""))
-    why_now = escape(data.get("why_now", ""))
-    what_happened = escape(data.get("what_happened", ""))
-    market_impact = escape(data.get("market_impact", ""))
-    outlook_1d = escape(data.get("outlook_1d", ""))
-    outlook_3d = escape(data.get("outlook_3d", ""))
-    outlook_7d = escape(data.get("outlook_7d", ""))
-    risk_warning = escape(data.get("risk_warning", ""))
-    key_points = data.get("key_points", [])
-    watchlist = data.get("watchlist", [])
-
-    key_points_html = "".join(f"<li>{escape(item)}</li>" for item in key_points[:3])
-
-    watch_html = ""
+def render_watch_cards(watchlist: list[dict]) -> str:
+    cards = ""
     for item in watchlist:
-        name = escape(item.get("name", "未知资产"))
+        name = escape(item.get("name", "未知对象"))
         view = escape(item.get("view", "中性"))
         reason = escape(item.get("reason", ""))
-        cls = "up" if view == "偏多" else ("down" if view == "偏空" else "flat")
-        watch_html += f"""
+        cls = "up" if view in ["偏多", "利多"] else ("down" if view in ["偏空", "利空"] else "flat")
+        cards += f"""
         <div class="asset-card">
           <div class="asset-top">
             <div class="asset-name">{name}</div>
@@ -331,59 +365,118 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
           <div class="asset-reason">{reason}</div>
         </div>
         """
+    return cards
 
-    normalized_images = [escape(p.replace(os.sep, "/")) for p in source_images]
 
-    gallery_html = ""
-    for rel in normalized_images:
-        gallery_html += f"""
-        <div class="gallery-item">
-          <img src="{rel}" alt="source image">
-        </div>
+def build_category_specific_block(category: str, data: dict) -> str:
+    watch_html = render_watch_cards(data.get("watchlist", []))
+
+    if category == "breaking":
+        return f"""
+        <section class="card">
+          <h2>关键观察对象</h2>
+          <div class="watch-grid">
+            {watch_html}
+          </div>
+        </section>
         """
 
+    if category == "market":
+        return f"""
+        <section class="card">
+          <h2>重点资产与方向</h2>
+          <div class="watch-grid">
+            {watch_html}
+          </div>
+        </section>
+        """
+
+    if category == "tech":
+        return f"""
+        <section class="card">
+          <h2>值得跟进的技术与公司</h2>
+          <div class="watch-grid">
+            {watch_html}
+          </div>
+        </section>
+        """
+
+    return f"""
+    <section class="card">
+      <h2>值得盯住的公司与行业</h2>
+      <div class="watch-grid">
+        {watch_html}
+      </div>
+    </section>
+    """
+
+
+def build_html_report(data: dict, source_images: list[str]) -> str:
+    category = data.get("category", "breaking")
+    meta = CATEGORY_META.get(category, CATEGORY_META["breaking"])
+    accent = meta["color"]
+
+    title = escape(data.get("title", "全球情报"))
+    subtitle = escape(data.get("subtitle", ""))
+    deck = escape(data.get("deck", ""))
+    why_now = escape(data.get("why_now", ""))
+    section_1_title = escape(data.get("section_1_title", "第一观察"))
+    section_1_body = escape(data.get("section_1_body", ""))
+    section_2_title = escape(data.get("section_2_title", "第二观察"))
+    section_2_body = escape(data.get("section_2_body", ""))
+    outlook_1d = escape(data.get("outlook_1d", ""))
+    outlook_3d = escape(data.get("outlook_3d", ""))
+    outlook_7d = escape(data.get("outlook_7d", ""))
+    risk_warning = escape(data.get("risk_warning", ""))
+    key_points = data.get("key_points", [])
+    watchlist = data.get("watchlist", [])
+
+    key_points_html = "".join(f"<li>{escape(item)}</li>" for item in key_points[:3])
+    category_block = build_category_specific_block(category, data)
+
+    normalized_images = [escape(p.replace(os.sep, "/")) for p in source_images]
     image_block_1 = ""
     image_block_2 = ""
+    gallery_section = ""
 
     if len(normalized_images) >= 1:
-        img1 = normalized_images[0]
         image_block_1 = f"""
         <div class="inline-visual">
-          <img src="{img1}" alt="source image 1">
+          <img src="{normalized_images[0]}" alt="source image 1">
+        </div>
+        """
+    else:
+        image_block_1 = """
+        <div class="card story">
+          <h2>现场线索</h2>
+          <p>当前未抓取到可用原图，建议改用具体文章页而不是频道页。</p>
         </div>
         """
 
     if len(normalized_images) >= 2:
-        img2 = normalized_images[1]
         image_block_2 = f"""
         <div class="inline-visual">
-          <img src="{img2}" alt="source image 2">
+          <img src="{normalized_images[1]}" alt="source image 2">
+        </div>
+        """
+    else:
+        image_block_2 = """
+        <div class="card story">
+          <h2>进一步观察</h2>
+          <p>如果换成具体原文链接，系统会优先展示正文头图与大图。</p>
         </div>
         """
 
-    has_source_images = len(normalized_images) > 0
-
-    visual_block_1 = image_block_1 if image_block_1 else """
-    <div class="card story">
-      <h2>现场画面</h2>
-      <p>当前未抓取到可用的原文配图，建议改用具体文章链接而不是频道页。</p>
-    </div>
-    """
-
-    visual_block_2 = image_block_2 if image_block_2 else """
-    <div class="card story">
-      <h2>进一步观察</h2>
-      <p>一旦接入真实文章页，系统会优先展示原文中的头图与正文大图。</p>
-    </div>
-    """
-
-    gallery_section = ""
-    if has_source_images:
+    if normalized_images:
+        gallery_items = "".join(
+            f'<div class="gallery-item"><img src="{rel}" alt="source image"></div>'
+            for rel in normalized_images
+        )
         gallery_section = f"""
         <section class="card">
           <h2>资讯图片</h2>
           <div class="gallery">
-            {gallery_html}
+            {gallery_items}
           </div>
         </section>
         """
@@ -434,14 +527,24 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
       box-shadow: 0 18px 42px rgba(0,0,0,.18);
     }}
     .eyebrow {{
-      color: #7dd3fc;
+      color: #cfe4ff;
       font-size: 13px;
       font-weight: 700;
       letter-spacing: .08em;
       text-transform: uppercase;
     }}
+    .category-pill {{
+      display: inline-block;
+      margin-top: 14px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: {accent};
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+    }}
     h1 {{
-      margin: 12px 0 0;
+      margin: 14px 0 0;
       font-size: 40px;
       line-height: 1.2;
       letter-spacing: -0.03em;
@@ -650,14 +753,15 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
         <img src="cover.png" alt="cover">
       </div>
       <div class="hero-panel">
-        <div class="eyebrow">MARKET INTELLIGENCE</div>
+        <div class="eyebrow">GLOBAL INTELLIGENCE DESK</div>
+        <div class="category-pill">{escape(meta["label"])}</div>
         <h1>{title}</h1>
         <div class="subtitle">{subtitle}</div>
         <div class="deck">{deck}</div>
         <div class="tag-row">
-          <div class="tag">全球风险</div>
-          <div class="tag">市场冲击</div>
-          <div class="tag">短期观察</div>
+          <div class="tag">全球新闻</div>
+          <div class="tag">多频道</div>
+          <div class="tag">重点观察</div>
         </div>
       </div>
     </section>
@@ -677,8 +781,8 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
             <div class="meta-value">{why_now}</div>
           </div>
           <div class="meta-item">
-            <div class="meta-label">Time window</div>
-            <div class="meta-value">重点观察未来 1 到 7 天的市场反应与风险偏好变化。</div>
+            <div class="meta-label">Category</div>
+            <div class="meta-value">{escape(meta["label"])}</div>
           </div>
         </div>
       </div>
@@ -686,18 +790,18 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
 
     <section class="story-grid">
       <div class="card story">
-        <h2>发生了什么</h2>
-        <p>{what_happened}</p>
+        <h2>{section_1_title}</h2>
+        <p>{section_1_body}</p>
       </div>
-      {visual_block_1}
+      {image_block_1}
     </section>
 
     <section class="story-grid">
       <div class="card story">
-        <h2>这对市场意味着什么</h2>
-        <p>{market_impact}</p>
+        <h2>{section_2_title}</h2>
+        <p>{section_2_body}</p>
       </div>
-      {visual_block_2}
+      {image_block_2}
     </section>
 
     <section class="card">
@@ -718,12 +822,7 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
       </div>
     </section>
 
-    <section class="card">
-      <h2>值得盯住的资产</h2>
-      <div class="watch-grid">
-        {watch_html}
-      </div>
-    </section>
+    {category_block}
 
     {gallery_section}
 
@@ -745,14 +844,18 @@ def save_html_report(html: str, filename: str = REPORT_HTML_FILE) -> str:
 
 
 def save_report_meta(data: dict, filename: str = REPORT_META_FILE) -> str:
-    meta = {
-        "title": data.get("title", "市场快讯"),
+    category = data.get("category", "breaking")
+    meta = CATEGORY_META.get(category, CATEGORY_META["breaking"])
+    title = f'{meta["prefix"]}{data.get("title", "全球情报")}'
+
+    saved = {
+        "title": title,
         "description": data.get("deck", "暂无摘要"),
         "url": REPORT_URL,
         "picurl": DEFAULT_PIC_URL
     }
     with open(filename, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+        json.dump(saved, f, ensure_ascii=False, indent=2)
     return filename
 
 
