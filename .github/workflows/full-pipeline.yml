@@ -39,7 +39,7 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           REPORT_URL: https://mazikai666.github.io/market-intel-bot/
-          DEFAULT_PIC_URL: https://mazikai666.github.io/market-intel-bot/cover.png
+          DEFAULT_PIC_URL: https://mazikai666.github.io/market-intel-bot/cover.jpg
           PUSH_TO_WECOM: "false"
           TEST_NEWS: ""
           SOURCE_ARTICLE_URL: ""
@@ -61,7 +61,7 @@ jobs:
         run: |
           mkdir -p _site/images
           cp report.html _site/index.html
-          cp cover.png _site/cover.png
+          cp cover.jpg _site/cover.jpg
           cp -r images/. _site/images/ || true
 
       - name: Configure Pages
