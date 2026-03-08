@@ -9,9 +9,29 @@ FEED_SOURCES = [
         "url": "https://feeds.reuters.com/reuters/worldNews",
     },
     {
+        "name": "Reuters Business",
+        "category_hint": "business",
+        "url": "https://feeds.reuters.com/reuters/businessNews",
+    },
+    {
         "name": "Reuters Markets",
         "category_hint": "market",
         "url": "https://feeds.reuters.com/news/wealth",
+    },
+    {
+        "name": "AP News",
+        "category_hint": "breaking",
+        "url": "https://apnews.com/hub/ap-top-news?output=rss",
+    },
+    {
+        "name": "BBC World",
+        "category_hint": "breaking",
+        "url": "http://feeds.bbci.co.uk/news/world/rss.xml",
+    },
+    {
+        "name": "CNBC World",
+        "category_hint": "market",
+        "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
     },
     {
         "name": "CoinDesk",
@@ -22,6 +42,16 @@ FEED_SOURCES = [
         "name": "TechCrunch",
         "category_hint": "tech",
         "url": "https://techcrunch.com/feed/",
+    },
+    {
+        "name": "The Verge",
+        "category_hint": "tech",
+        "url": "https://www.theverge.com/rss/index.xml",
+    },
+    {
+        "name": "Ars Technica",
+        "category_hint": "tech",
+        "url": "https://feeds.arstechnica.com/arstechnica/index",
     },
 ]
 
@@ -53,7 +83,7 @@ def fetch_rss_feed(source: dict, timeout: int = 20) -> list[dict]:
         return []
 
     items = []
-    for item in root.findall(".//item")[:15]:
+    for item in root.findall(".//item")[:20]:
         title = _get_text(item, ["title"])
         link = _get_text(item, ["link"])
         description = _get_text(item, ["description"])
@@ -70,6 +100,7 @@ def fetch_rss_feed(source: dict, timeout: int = 20) -> list[dict]:
                 "link": link,
                 "description": description,
                 "pub_date": pub_date,
+                "language": "en",
             }
         )
     return items
