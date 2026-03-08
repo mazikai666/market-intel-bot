@@ -109,8 +109,8 @@ def call_deepseek(news_text: str) -> dict:
     }
 
     prompt = f"""
-你是一个全球资讯编辑台的总编。
-请先判断下面这条新闻属于哪一类，再按对应媒体风格生成专题页素材。
+你是一个全球资讯编辑台总编。
+请先判断下面这条新闻属于哪一类，再按对应媒体风格生成一篇“全球情报专题页”素材。
 
 可选分类只有四种：
 - breaking：全球突发（战争、冲突、灾害、重大政策、国际局势）
@@ -122,12 +122,11 @@ def call_deepseek(news_text: str) -> dict:
 1. 先分类，再写作
 2. 不要千篇一律
 3. 不同分类的写法要明显不同
-4. breaking 要像国际新闻快讯
-5. market 要像市场晨报/交易简报
-6. tech 要像科技媒体深读
-7. business 要像商业媒体报道
-8. 语言专业、克制、有信息密度
-9. 严格输出 JSON，不要输出任何额外文字
+4. 页面内容要丰富，不局限于市场判断
+5. 增加背景、时间线、全球影响、关键观察点、来源信息
+6. 语言专业、克制、有信息密度
+7. 避免“必然、一定、注定”这类武断词
+8. 严格输出 JSON，不要输出任何额外文字
 
 新闻：
 {news_text}
@@ -143,11 +142,24 @@ def call_deepseek(news_text: str) -> dict:
     "重点2",
     "重点3"
   ],
-  "why_now": "为什么现在值得关注",
+  "background": "背景与来龙去脉，一段",
+  "why_now": "为什么现在值得关注，一段",
+  "timeline": [
+    {{"time": "节点1", "event": "事件1"}},
+    {{"time": "节点2", "event": "事件2"}},
+    {{"time": "节点3", "event": "事件3"}}
+  ],
+  "global_impact": "对国家、地区、行业或全球格局的影响，一段",
   "section_1_title": "第一部分标题",
   "section_1_body": "第一部分正文，一段",
   "section_2_title": "第二部分标题",
   "section_2_body": "第二部分正文，一段",
+  "market_or_industry_impact": "对市场或产业链的影响，一段",
+  "watch_points": [
+    "接下来要观察的点1",
+    "接下来要观察的点2",
+    "接下来要观察的点3"
+  ],
   "outlook_1d": "未来1天/短期观察",
   "outlook_3d": "未来3天/中短期观察",
   "outlook_7d": "未来7天/一周观察",
@@ -157,6 +169,10 @@ def call_deepseek(news_text: str) -> dict:
     {{"name": "对象3", "view": "偏多/偏空/关注/中性", "reason": "一句原因"}}
   ],
   "risk_warning": "一句风险提示",
+  "sources": [
+    {{"name": "来源1", "note": "为什么值得看"}},
+    {{"name": "来源2", "note": "为什么值得看"}}
+  ],
   "cover": {{
     "theme": "封面主题",
     "strapline": "封面小字，12字以内",
@@ -177,7 +193,7 @@ def call_deepseek(news_text: str) -> dict:
                 "content": prompt
             }
         ],
-        "temperature": 0.7,
+        "temperature": 0.75,
         "response_format": {"type": "json_object"}
     }
 
@@ -188,12 +204,11 @@ def call_deepseek(news_text: str) -> dict:
     content = result["choices"][0]["message"]["content"]
     print("DeepSeek 原始返回：")
     print(repr(content))
-    parsed = extract_json_from_text(content)
 
+    parsed = extract_json_from_text(content)
     category = parsed.get("category", "breaking")
     if category not in CATEGORY_META:
         parsed["category"] = "breaking"
-
     return parsed
 
 
@@ -368,42 +383,61 @@ def render_watch_cards(watchlist: list[dict]) -> str:
     return cards
 
 
+def render_timeline(timeline: list[dict]) -> str:
+    if not timeline:
+        return "<div class='timeline-item'><div class='timeline-time'>Now</div><div class='timeline-event'>当前暂无时间线细节。</div></div>"
+
+    blocks = ""
+    for item in timeline[:5]:
+        t = escape(item.get("time", "时间待定"))
+        e = escape(item.get("event", "事件待补充"))
+        blocks += f"""
+        <div class="timeline-item">
+          <div class="timeline-time">{t}</div>
+          <div class="timeline-event">{e}</div>
+        </div>
+        """
+    return blocks
+
+
+def render_watch_points(points: list[str]) -> str:
+    if not points:
+        return "<li>暂无补充观察点。</li>"
+    return "".join(f"<li>{escape(p)}</li>" for p in points[:5])
+
+
+def render_sources(sources: list[dict]) -> str:
+    if not sources:
+        return "<div class='source-item'><div class='source-name'>AI Desk</div><div class='source-note'>当前未提供外部来源说明。</div></div>"
+
+    html = ""
+    for s in sources[:5]:
+        name = escape(s.get("name", "来源"))
+        note = escape(s.get("note", ""))
+        html += f"""
+        <div class="source-item">
+          <div class="source-name">{name}</div>
+          <div class="source-note">{note}</div>
+        </div>
+        """
+    return html
+
+
 def build_category_specific_block(category: str, data: dict) -> str:
     watch_html = render_watch_cards(data.get("watchlist", []))
 
     if category == "breaking":
-        return f"""
-        <section class="card">
-          <h2>关键观察对象</h2>
-          <div class="watch-grid">
-            {watch_html}
-          </div>
-        </section>
-        """
-
-    if category == "market":
-        return f"""
-        <section class="card">
-          <h2>重点资产与方向</h2>
-          <div class="watch-grid">
-            {watch_html}
-          </div>
-        </section>
-        """
-
-    if category == "tech":
-        return f"""
-        <section class="card">
-          <h2>值得跟进的技术与公司</h2>
-          <div class="watch-grid">
-            {watch_html}
-          </div>
-        </section>
-        """
+        title = "关键地区与对象"
+    elif category == "market":
+        title = "重点资产与方向"
+    elif category == "tech":
+        title = "值得跟进的技术与公司"
+    else:
+        title = "值得盯住的公司与行业"
 
     return f"""
     <section class="card">
-      <h2>值得盯住的公司与行业</h2>
+      <h2>{title}</h2>
       <div class="watch-grid">
         {watch_html}
       </div>
@@ -419,22 +453,31 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
     title = escape(data.get("title", "全球情报"))
     subtitle = escape(data.get("subtitle", ""))
     deck = escape(data.get("deck", ""))
+    background = escape(data.get("background", ""))
     why_now = escape(data.get("why_now", ""))
+    global_impact = escape(data.get("global_impact", ""))
     section_1_title = escape(data.get("section_1_title", "第一观察"))
     section_1_body = escape(data.get("section_1_body", ""))
     section_2_title = escape(data.get("section_2_title", "第二观察"))
     section_2_body = escape(data.get("section_2_body", ""))
+    market_or_industry_impact = escape(data.get("market_or_industry_impact", ""))
     outlook_1d = escape(data.get("outlook_1d", ""))
     outlook_3d = escape(data.get("outlook_3d", ""))
     outlook_7d = escape(data.get("outlook_7d", ""))
     risk_warning = escape(data.get("risk_warning", ""))
     key_points = data.get("key_points", [])
-    watchlist = data.get("watchlist", [])
+    timeline = data.get("timeline", [])
+    watch_points = data.get("watch_points", [])
+    sources = data.get("sources", [])
 
     key_points_html = "".join(f"<li>{escape(item)}</li>" for item in key_points[:3])
     category_block = build_category_specific_block(category, data)
+    timeline_html = render_timeline(timeline)
+    watch_points_html = render_watch_points(watch_points)
+    sources_html = render_sources(sources)
 
     normalized_images = [escape(p.replace(os.sep, "/")) for p in source_images]
+
     image_block_1 = ""
     image_block_2 = ""
     gallery_section = ""
@@ -496,7 +539,7 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
       line-height: 1.8;
     }}
     .shell {{
-      max-width: 1260px;
+      max-width: 1280px;
       margin: 0 auto;
       padding: 20px 16px 56px;
     }}
@@ -581,6 +624,12 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
       gap: 18px;
       margin-top: 18px;
     }}
+    .content-grid {{
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 18px;
+      margin-top: 18px;
+    }}
     .card {{
       background: #0f172a;
       border: 1px solid rgba(148,163,184,.14);
@@ -593,11 +642,11 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
       font-size: 22px;
       color: #fff;
     }}
-    .summary-list {{
+    .summary-list, .watch-list {{
       margin: 0;
       padding-left: 18px;
     }}
-    .summary-list li {{
+    .summary-list li, .watch-list li {{
       margin-bottom: 12px;
       font-size: 17px;
       color: #dbe7f5;
@@ -647,6 +696,26 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
       height: 100%;
       object-fit: cover;
       display: block;
+    }}
+    .timeline {{
+      display: grid;
+      gap: 14px;
+    }}
+    .timeline-item {{
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(2,6,23,.35);
+      border: 1px solid rgba(148,163,184,.12);
+    }}
+    .timeline-time {{
+      color: #7dd3fc;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }}
+    .timeline-event {{
+      color: #e5edf7;
+      font-size: 16px;
     }}
     .outlook-grid {{
       display: grid;
@@ -728,12 +797,31 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
       object-fit: cover;
       display: block;
     }}
+    .source-grid {{
+      display: grid;
+      gap: 12px;
+    }}
+    .source-item {{
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(2,6,23,.35);
+      border: 1px solid rgba(148,163,184,.12);
+    }}
+    .source-name {{
+      color: #fff;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }}
+    .source-note {{
+      color: #cbd5e1;
+      font-size: 15px;
+    }}
     .risk {{
       background: linear-gradient(180deg, rgba(127,29,29,.28), rgba(69,10,10,.24));
       border: 1px solid rgba(252,165,165,.2);
     }}
-    @media (max-width: 900px) {{
-      .hero, .split, .story-grid {{
+    @media (max-width: 980px) {{
+      .hero, .split, .content-grid, .story-grid {{
         grid-template-columns: 1fr;
       }}
       .outlook-grid {{
@@ -760,7 +848,7 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
         <div class="deck">{deck}</div>
         <div class="tag-row">
           <div class="tag">全球新闻</div>
-          <div class="tag">多频道</div>
+          <div class="tag">专题页</div>
           <div class="tag">重点观察</div>
         </div>
       </div>
@@ -788,6 +876,19 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
       </div>
     </section>
 
+    <section class="content-grid">
+      <div class="card story">
+        <h2>背景与来龙去脉</h2>
+        <p>{background}</p>
+      </div>
+      <div class="card">
+        <h2>时间线</h2>
+        <div class="timeline">
+          {timeline_html}
+        </div>
+      </div>
+    </section>
+
     <section class="story-grid">
       <div class="card story">
         <h2>{section_1_title}</h2>
@@ -804,20 +905,39 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
       {image_block_2}
     </section>
 
-    <section class="card">
-      <h2>接下来 1 到 7 天怎么看</h2>
-      <div class="outlook-grid">
-        <div class="mini">
-          <h3>1天</h3>
-          <div>{outlook_1d}</div>
-        </div>
-        <div class="mini">
-          <h3>3天</h3>
-          <div>{outlook_3d}</div>
-        </div>
-        <div class="mini">
-          <h3>7天</h3>
-          <div>{outlook_7d}</div>
+    <section class="content-grid">
+      <div class="card story">
+        <h2>全球影响范围</h2>
+        <p>{global_impact}</p>
+      </div>
+      <div class="card story">
+        <h2>市场或产业反应</h2>
+        <p>{market_or_industry_impact}</p>
+      </div>
+    </section>
+
+    <section class="content-grid">
+      <div class="card">
+        <h2>关键观察点</h2>
+        <ul class="watch-list">
+          {watch_points_html}
+        </ul>
+      </div>
+      <div class="card">
+        <h2>接下来 1 到 7 天怎么看</h2>
+        <div class="outlook-grid">
+          <div class="mini">
+            <h3>1天</h3>
+            <div>{outlook_1d}</div>
+          </div>
+          <div class="mini">
+            <h3>3天</h3>
+            <div>{outlook_3d}</div>
+          </div>
+          <div class="mini">
+            <h3>7天</h3>
+            <div>{outlook_7d}</div>
+          </div>
         </div>
       </div>
     </section>
@@ -826,9 +946,17 @@ def build_html_report(data: dict, source_images: list[str]) -> str:
 
     {gallery_section}
 
-    <section class="card risk">
-      <h2>还要留意什么变量</h2>
-      <div>{risk_warning}</div>
+    <section class="content-grid">
+      <div class="card">
+        <h2>资料与来源</h2>
+        <div class="source-grid">
+          {sources_html}
+        </div>
+      </div>
+      <section class="card risk">
+        <h2>还要留意什么变量</h2>
+        <div>{risk_warning}</div>
+      </section>
     </section>
   </div>
 </body>
